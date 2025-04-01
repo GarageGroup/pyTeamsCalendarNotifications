@@ -1,0 +1,5 @@
+msal==1.25.0
+requests==2.31.0
+python-dotenv==1.0.0
+plyer==2.1.0
+python-telegram-bot==20.7 
