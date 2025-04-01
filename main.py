@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import json
 from datetime import datetime, timedelta, UTC
 import msal
 import requests
@@ -93,6 +94,31 @@ AUTHORITY = f'https://login.microsoftonline.com/{TENANT_ID}'
 
 # Инициализация Telegram бота
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
+
+# Путь к файлу с уведомлениями
+NOTIFICATIONS_FILE = 'sent_notifications.json'
+
+def load_notifications():
+    """Загрузка информации об отправленных уведомлениях из JSON файла"""
+    try:
+        if os.path.exists(NOTIFICATIONS_FILE):
+            with open(NOTIFICATIONS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке файла уведомлений: {e}")
+        return {}
+
+def save_notifications(notifications):
+    """Сохранение информации об отправленных уведомлениях в JSON файл"""
+    try:
+        with open(NOTIFICATIONS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(notifications, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении файла уведомлений: {e}")
+
+# Загружаем уведомления при запуске
+sent_notifications = load_notifications()
 
 async def send_telegram_message(message):
     """Отправка сообщения в Telegram"""
@@ -194,6 +220,19 @@ async def check_upcoming_events():
         # Получаем текущее время в UTC
         now = datetime.now(UTC)
         
+        # Очищаем старые записи из словаря (старше 1 часа)
+        current_time = datetime.now(UTC)
+        old_keys = []
+        for key, timestamp in sent_notifications.items():
+            if (current_time - datetime.fromisoformat(timestamp)).total_seconds() > 3600:  # 1 час
+                old_keys.append(key)
+        
+        for key in old_keys:
+            del sent_notifications[key]
+        
+        # Сохраняем очищенный словарь
+        save_notifications(sent_notifications)
+        
         for event in events:
             try:
                 # Проверяем наличие необходимых полей
@@ -211,6 +250,7 @@ async def check_upcoming_events():
                     start_time = datetime.fromisoformat(start_time_str + '+00:00')
                 
                 event_title = event.get('subject', 'Без названия')
+                event_id = event.get('id', '')  # Получаем ID события
                 
                 # Получаем информацию о Teams-встрече
                 teams_info = ""
@@ -253,25 +293,34 @@ async def check_upcoming_events():
                 # Проверяем, начинается ли событие через 5 минут
                 time_diff = start_time - now
                 if time_diff <= timedelta(minutes=5) and time_diff > timedelta(minutes=4):
-                    message = (
-                        f'🔔 Событие начинается через 5 минут\n'
-                        f'📅 Событие: {event_title}'
-                        f'{location_info}'
-                        f'{teams_info}{attendees_info}'
-                    )
-                    logger.info(f"Отправка уведомления за 5 минут до события: {event_title}")
-                    await send_telegram_message(message)
+                    notification_key = f"{event_id}_5min"
+                    if notification_key not in sent_notifications:
+                        message = (
+                            f'🔔 Событие начинается через 5 минут\n'
+                            f'📅 Событие: {event_title}'
+                            f'{location_info}'
+                            f'{teams_info}{attendees_info}'
+                        )
+                        logger.info(f"Отправка уведомления за 5 минут до события: {event_title}")
+                        await send_telegram_message(message)
+                        sent_notifications[notification_key] = current_time.isoformat()
+                        save_notifications(sent_notifications)
                 
                 # Проверяем, началось ли событие
                 if start_time <= now and start_time + timedelta(minutes=1) > now:
-                    message = (
-                        f'🔔 Событие начинается сейчас\n'
-                        f'📅 Событие: {event_title}'
-                        f'{location_info}'
-                        f'{teams_info}{attendees_info}'
-                    )
-                    logger.info(f"Отправка уведомления о начале события: {event_title}")
-                    await send_telegram_message(message)
+                    notification_key = f"{event_id}_start"
+                    if notification_key not in sent_notifications:
+                        message = (
+                            f'🔔 Событие начинается сейчас\n'
+                            f'📅 Событие: {event_title}'
+                            f'{location_info}'
+                            f'{teams_info}{attendees_info}'
+                        )
+                        logger.info(f"Отправка уведомления о начале события: {event_title}")
+                        await send_telegram_message(message)
+                        sent_notifications[notification_key] = current_time.isoformat()
+                        save_notifications(sent_notifications)
+                
             except Exception as e:
                 logger.error(f"Ошибка при обработке события {event.get('subject', 'Неизвестное')}: {e}")
                 logger.error(f"Данные события: {event}")
