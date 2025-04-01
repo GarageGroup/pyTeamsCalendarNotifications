@@ -176,4 +176,5 @@ cython_debug/
 # Custom
 .vs/
 .vscode/
-sent_notifications.json
+logs/
+data/

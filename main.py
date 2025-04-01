@@ -17,6 +17,10 @@ load_dotenv()
 if not os.path.exists('logs'):
     os.makedirs('logs')
 
+# Создание директории для данных
+if not os.path.exists('data'):
+    os.makedirs('data')
+
 # Настройка логирования
 def setup_logging():
     """Настройка системы логирования"""
@@ -96,7 +100,9 @@ AUTHORITY = f'https://login.microsoftonline.com/{TENANT_ID}'
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
 # Путь к файлу с уведомлениями
-NOTIFICATIONS_FILE = 'sent_notifications.json'
+NOTIFICATIONS_FILE = os.path.join('data', 'sent_notifications.json')
+# Путь к файлу с кэшем токена
+TOKEN_CACHE_FILE = os.path.join('data', 'token_cache.json')
 
 def load_notifications():
     """Загрузка информации об отправленных уведомлениях из JSON файла"""
@@ -120,6 +126,28 @@ def save_notifications(notifications):
 # Загружаем уведомления при запуске
 sent_notifications = load_notifications()
 
+def load_token_cache():
+    """Загрузка кэша токена из JSON файла"""
+    try:
+        if os.path.exists(TOKEN_CACHE_FILE):
+            with open(TOKEN_CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке кэша токена: {e}")
+        return {}
+
+def save_token_cache(token_data):
+    """Сохранение кэша токена в JSON файл"""
+    try:
+        with open(TOKEN_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(token_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении кэша токена: {e}")
+
+# Загружаем кэш токена при запуске
+token_cache = load_token_cache()
+
 async def send_telegram_message(message):
     """Отправка сообщения в Telegram"""
     try:
@@ -129,22 +157,40 @@ async def send_telegram_message(message):
         logger.error(f"Ошибка при отправке сообщения в Telegram: {e}")
 
 def get_access_token():
-    """Получение токена доступа через MSAL"""
+    """Получение токена доступа через MSAL с использованием кэша"""
     try:
-        logger.debug(f"Попытка получения токена доступа. Authority: {AUTHORITY}")
+        # Проверяем наличие токена в кэше
+        if token_cache:
+            cached_token = token_cache.get('access_token')
+            expires_at = datetime.fromisoformat(token_cache.get('expires_at', ''))
+            current_time = datetime.now(UTC)
+            
+            # Если токен существует и не истек
+            if cached_token and expires_at > current_time:
+                logger.info("Используется кэшированный токен")
+                return cached_token
+        
+        logger.debug(f"Попытка получения нового токена доступа. Authority: {AUTHORITY}")
         app = msal.ConfidentialClientApplication(
             client_id=CLIENT_ID,
             client_credential=CLIENT_SECRET,
             authority=AUTHORITY
         )
         
-        result = app.acquire_token_silent(SCOPES, account=None)
-        if not result:
-            logger.debug("Токен не найден в кэше, запрашиваем новый")
-            result = app.acquire_token_for_client(scopes=SCOPES)
+        result = app.acquire_token_for_client(scopes=SCOPES)
         
         if 'access_token' in result:
-            logger.info("Токен доступа успешно получен")
+            # Сохраняем токен в кэш
+            expires_in = result.get('expires_in', 3600)  # По умолчанию 1 час
+            expires_at = datetime.now(UTC) + timedelta(seconds=expires_in - 300)  # Вычитаем 5 минут для надежности
+            
+            token_cache_data = {
+                'access_token': result['access_token'],
+                'expires_at': expires_at.isoformat()
+            }
+            save_token_cache(token_cache_data)
+            
+            logger.info("Новый токен доступа успешно получен и сохранен в кэш")
             return result['access_token']
         else:
             logger.error(f"Ошибка получения токена: {result.get('error_description', 'Неизвестная ошибка')}")
