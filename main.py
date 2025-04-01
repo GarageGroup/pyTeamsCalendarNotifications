@@ -343,7 +343,7 @@ async def check_upcoming_events():
                     if notification_key not in sent_notifications:
                         message = (
                             f'🔔 Событие начинается через 5 минут\n'
-                            f'📅 Событие: {event_title}'
+                            f'📅 Название: {event_title}'
                             f'{location_info}'
                             f'{teams_info}{attendees_info}'
                         )
@@ -357,8 +357,8 @@ async def check_upcoming_events():
                     notification_key = f"{event_id}_start"
                     if notification_key not in sent_notifications:
                         message = (
-                            f'🔔 Событие начинается сейчас\n'
-                            f'📅 Событие: {event_title}'
+                            f'📛 Событие начинается сейчас!\n'
+                            f'📅 Название: {event_title}'
                             f'{location_info}'
                             f'{teams_info}{attendees_info}'
                         )
